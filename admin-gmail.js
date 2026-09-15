@@ -41,6 +41,81 @@ let gmailMensagensCache = {};
 let gmailMensagemAtual = null;
 
 
+const GMAIL_TOKEN_VALIDADE_MS = 55 * 60 * 1000; // 55 minutos (token do Google dura ~60min)
+
+/* =========================================================
+   TOKEN COMPARTILHADO (Firebase) — permite que outros admins
+   vejam a caixa sem logar de novo, por até ~55 minutos.
+========================================================= */
+
+function salvarTokenCompartilhado(token) {
+
+    try {
+
+        if (typeof db === "undefined") {
+            return;
+        }
+
+        db.ref("configGmail/token").set({
+            token: token,
+            criadoEm: Date.now(),
+            expiraEm: Date.now() + GMAIL_TOKEN_VALIDADE_MS
+        });
+
+    } catch (error) {
+
+        console.error("Erro ao salvar token compartilhado:", error);
+    }
+}
+
+async function carregarTokenCompartilhado() {
+
+    try {
+
+        if (typeof db === "undefined") {
+            return false;
+        }
+
+        const snap = await db.ref("configGmail/token").once("value");
+
+        const dados = snap.val();
+
+        if (!dados || !dados.token || !dados.expiraEm) {
+            return false;
+        }
+
+        if (Date.now() >= dados.expiraEm) {
+            return false;
+        }
+
+        gmailAccessToken = dados.token;
+
+        onGmailConectado(true);
+
+        return true;
+
+    } catch (error) {
+
+        console.error("Erro ao carregar token compartilhado:", error);
+
+        return false;
+    }
+}
+
+function limparTokenCompartilhado() {
+
+    try {
+
+        if (typeof db !== "undefined") {
+            db.ref("configGmail/token").remove();
+        }
+
+    } catch (error) {}
+
+    gmailAccessToken = null;
+}
+
+
 /* =========================================================
    AUTENTICAÇÃO
 ========================================================= */
@@ -83,7 +158,9 @@ function conectarGmail() {
 
                         gmailAccessToken = resposta.access_token;
 
-                        onGmailConectado();
+                        salvarTokenCompartilhado(resposta.access_token);
+
+                        onGmailConectado(false);
 
                     } else if (resposta && resposta.error) {
 
@@ -110,7 +187,7 @@ function conectarGmail() {
     }
 }
 
-function onGmailConectado() {
+function onGmailConectado(viaCompartilhado) {
 
     const btnConectar = document.getElementById("btnGmailConectar");
     const btnAtualizar = document.getElementById("btnGmailAtualizar");
@@ -118,7 +195,10 @@ function onGmailConectado() {
     const naoConectado = document.getElementById("gmailNaoConectado");
     const layout = document.getElementById("gmailLayout");
 
-    if (btnConectar) btnConectar.style.display = "none";
+    if (btnConectar) {
+        btnConectar.style.display = "none";
+    }
+
     if (btnAtualizar) btnAtualizar.style.display = "inline-flex";
     if (chip) chip.style.display = "inline-flex";
     if (naoConectado) naoConectado.style.display = "none";
@@ -127,10 +207,55 @@ function onGmailConectado() {
     const contaEl = document.getElementById("gmailContaLogada");
 
     if (contaEl) {
-        contaEl.textContent = "kywifitelecom@gmail.com";
+        contaEl.textContent = viaCompartilhado
+            ? "kywifitelecom@gmail.com (conexão compartilhada)"
+            : "kywifitelecom@gmail.com";
     }
 
     listarEmailsGmail();
+}
+
+
+function voltarParaDesconectado(mensagem) {
+
+    const btnConectar = document.getElementById("btnGmailConectar");
+    const btnAtualizar = document.getElementById("btnGmailAtualizar");
+    const chip = document.getElementById("gmailStatusChip");
+    const naoConectado = document.getElementById("gmailNaoConectado");
+    const layout = document.getElementById("gmailLayout");
+
+    if (btnConectar) btnConectar.style.display = "inline-flex";
+    if (btnAtualizar) btnAtualizar.style.display = "none";
+    if (chip) chip.style.display = "none";
+    if (naoConectado) {
+        naoConectado.style.display = "block";
+        if (mensagem) {
+            naoConectado.innerHTML = `
+                <i class="fab fa-google" style="font-size:2.5rem;margin-bottom:12px;display:block;"></i>
+                ${escapeHtmlGmail(mensagem)}
+            `;
+        }
+    }
+    if (layout) layout.style.display = "none";
+}
+
+/**
+ * Chamada ao abrir a aba "Caixa de E-mail". Tenta usar o token já
+ * em memória, depois o token compartilhado salvo no Firebase, e só
+ * se nenhum dos dois existir/for válido é que mostra o botão Conectar.
+ */
+async function verificarConexaoGmail() {
+
+    if (gmailAccessToken) {
+        listarEmailsGmail();
+        return;
+    }
+
+    const usouCompartilhado = await carregarTokenCompartilhado();
+
+    if (!usouCompartilhado) {
+        voltarParaDesconectado();
+    }
 }
 
 
@@ -154,6 +279,20 @@ async function gmailFetch(caminho, opcoes = {}) {
             }
         }
     );
+
+    if (resposta.status === 401) {
+
+        limparTokenCompartilhado();
+
+        voltarParaDesconectado(
+            "A conexão expirou. Clique em Conectar Gmail de novo " +
+            "(precisa ser com a conta kywifitelecom@gmail.com)."
+        );
+
+        throw new Error(
+            "Sessão do Gmail expirada. Reconecte clicando em 'Conectar Gmail'."
+        );
+    }
 
     if (!resposta.ok) {
 
@@ -512,3 +651,4 @@ window.conectarGmail = conectarGmail;
 window.listarEmailsGmail = listarEmailsGmail;
 window.abrirEmailGmail = abrirEmailGmail;
 window.responderEmailGmail = responderEmailGmail;
+window.verificarConexaoGmail = verificarConexaoGmail;
