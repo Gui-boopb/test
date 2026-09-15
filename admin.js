@@ -154,8 +154,8 @@ function openTab(evt, tabId) {
   if (tabId === 'tabBoletos') carregarBoletos();
   if (tabId === 'tabChamados') carregarChamadosAdmin();
   if (tabId === 'tabAdmin') carregarUsuariosAdmin();
-  if (tabId === 'tabEmail' && typeof gmailAccessToken !== 'undefined' && gmailAccessToken) {
-    listarEmailsGmail();
+  if (tabId === 'tabEmail' && typeof verificarConexaoGmail === 'function') {
+    verificarConexaoGmail();
   }
 }
 
