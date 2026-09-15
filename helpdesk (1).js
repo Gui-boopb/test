@@ -1674,4 +1674,3 @@ window.enviarRespostaAdmin =
 
 window.adicionarRespostaEmailAdmin =
     adicionarRespostaEmailAdmin;
-    
