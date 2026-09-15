@@ -1,5 +1,5 @@
 /* ==========================================================================
-   KY WIFI TELECOM - SCRIPT PRINCIPAL (CORRIGIDO)
+   KY WIFI TELECOM - SCRIPT PRINCIPAL
    ========================================================================== */
 
 const NUMERO_WHATSAPP = "5561982031828";
@@ -11,9 +11,7 @@ let feedbackIndex = 0;
 let totalFeedbacks = 0;
 let autoPlayTimer = null;
 let carregandoFeedbacks = false;
-let enviandoFeedback = false;
 
-/* --- UTILITÁRIOS --- */
 function escapeHTML(str) {
     if (!str) return '';
     return String(str)
@@ -22,28 +20,6 @@ function escapeHTML(str) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
-}
-
-function showToast(mensagem, tipo = 'success') {
-    let container = document.getElementById('toast-container');
-    if (!container) {
-        container = document.createElement('div');
-        container.id = 'toast-container';
-        document.body.appendChild(container);
-    }
-
-    const toast = document.createElement('div');
-    toast.className = `custom-toast toast-${tipo}`;
-    const icone = tipo === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
-    toast.innerHTML = `<i class="fas ${icone}"></i><span>${escapeHTML(mensagem)}</span>`;
-
-    container.appendChild(toast);
-
-    setTimeout(() => toast.classList.add('show'), 10);
-    setTimeout(() => {
-        toast.classList.remove('show');
-        setTimeout(() => toast.remove(), 300);
-    }, 4000);
 }
 
 /* --- COOKIES E LGPD --- */
@@ -238,7 +214,7 @@ function definirNota(valor) {
     notaSelecionada = valor;
     const inputNota = document.getElementById('feedbackNota');
     if (inputNota) inputNota.value = valor;
-
+    
     const estrelas = document.querySelectorAll('#starRatingInput .star-btn');
     estrelas.forEach((estrela, index) => {
         if (index < valor) {
@@ -304,7 +280,7 @@ async function carregarFeedbacks() {
             return;
         }
 
-        // Filtra apenas depoimentos com texto válido
+        // Filtra apenas depoimentos que possuem texto válido (ignora vazios, nulos e apenas aspas)
         const validKeys = Object.keys(data).reverse().filter(key => {
             const fb = data[key];
             if (!fb || !fb.comentario) return false;
@@ -360,7 +336,15 @@ async function carregarFeedbacks() {
     }
 }
 
-/* Uma única função de envio (sem duplicação) */
+function escutarFeedbacksEmTempoReal() {
+    if (!window.EventSource) return;
+    const source = new EventSource(FIREBASE_DB_URL);
+    source.addEventListener('put', () => carregarFeedbacks());
+    source.addEventListener('patch', () => carregarFeedbacks());
+}
+
+let enviandoFeedback = false;
+
 async function salvarFeedback(event) {
     if (event) {
         event.preventDefault();
@@ -369,16 +353,15 @@ async function salvarFeedback(event) {
 
     if (enviandoFeedback) return;
 
-    const btnSubmit = event?.target?.querySelector?.('button[type="submit"]')
-        || document.querySelector('#feedbackForm button[type="submit"]');
-
+    const btnSubmit = event?.target?.querySelector('button[type="submit"]');
     const nome = document.getElementById('feedbackNome')?.value.trim();
     const plano = document.getElementById('feedbackTipo')?.value;
     const comentario = document.getElementById('feedbackComentario')?.value.trim();
     const nota = parseInt(document.getElementById('feedbackNota')?.value, 10) || notaSelecionada;
 
+    // Validação estrita: não permite salvar se qualquer campo obrigatório estiver em branco ou apenas com espaços
     if (!nome || !plano || !comentario || comentario === '""') {
-        showToast('Por favor, preencha todos os campos e digite seu comentário.', 'error');
+        alert("Por favor, preencha todos os campos e digite seu comentário antes de enviar.");
         return;
     }
 
@@ -404,17 +387,15 @@ async function salvarFeedback(event) {
         });
 
         if (response.ok) {
-            showToast('Avaliação enviada com sucesso!', 'success');
+            alert("Obrigado! Seu depoimento foi publicado.");
             document.getElementById('feedbackForm')?.reset();
             definirNota(5);
-            // Recarrega a lista uma única vez
-            await carregarFeedbacks();
         } else {
-            showToast('Ocorreu um erro ao gravar sua avaliação. Tente novamente.', 'error');
+            alert("Ocorreu um erro ao gravar sua avaliação. Tente novamente.");
         }
     } catch (error) {
         console.error("Erro ao conectar ao banco de dados:", error);
-        showToast('Erro ao conectar ao servidor.', 'error');
+        alert("Erro ao conectar ao servidor.");
     } finally {
         enviandoFeedback = false;
         if (btnSubmit) {
@@ -424,7 +405,6 @@ async function salvarFeedback(event) {
     }
 }
 
-/* --- INICIALIZAÇÃO --- */
 document.addEventListener("DOMContentLoaded", () => {
     const inputCPF = document.getElementById("cpf");
     if (inputCPF) inputCPF.addEventListener("input", (e) => aplicarMascaraCPF(e.target));
@@ -434,7 +414,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const feedbackForm = document.getElementById("feedbackForm");
     if (feedbackForm) {
-        // Garante apenas um listener
+        feedbackForm.removeEventListener("submit", salvarFeedback);
         feedbackForm.addEventListener("submit", salvarFeedback);
     }
 
@@ -442,7 +422,74 @@ document.addEventListener("DOMContentLoaded", () => {
     initObserver();
     initLGPD();
     registerServiceWorker();
-
-    // Carrega os depoimentos uma vez ao abrir a página
-    carregarFeedbacks();
+    escutarFeedbacksEmTempoReal();
 });
+// Função para Sanitização de HTML (Evita erros ao renderizar comentários)
+function escapeHTML(str) {
+    if (!str) return '';
+    return String(str).replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;'
+    }[tag] || tag));
+}
+
+// Sistema de Notificação Toast Personalizada
+function showToast(mensagem, tipo = 'success') {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `custom-toast toast-${tipo}`;
+    const icone = tipo === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+    toast.innerHTML = `<i class="fas ${icone}"></i><span>${mensagem}</span>`;
+
+    container.appendChild(toast);
+
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
+// Função de Envio do Formulário integrada ao Toast
+async function salvarFeedback(event) {
+    event.preventDefault();
+
+    const nome = document.getElementById('feedbackNome').value.trim();
+    const plano = document.getElementById('feedbackTipo').value;
+    const comentario = document.getElementById('feedbackComentario').value.trim();
+    const nota = document.getElementById('feedbackNota').value;
+
+    if (!nome || !plano || !comentario) {
+        showToast('Por favor, preencha todos os campos.', 'error');
+        return;
+    }
+
+    try {
+        const payload = { nome, plano, comentario, nota, data: new Date().toISOString() };
+        const response = await fetch(FIREBASE_DB_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            showToast('Avaliação enviada com sucesso!', 'success');
+            document.getElementById('feedbackForm').reset();
+            definirNota(5);
+            carregarFeedbacks();
+        } else {
+            throw new Error();
+        }
+    } catch (error) {
+        showToast('Erro ao enviar avaliação. Tente novamente.', 'error');
+    }
+}
